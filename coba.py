@@ -74,6 +74,7 @@ def generate_pdf_report(status_rek, staff_eksis, staff_opt, biaya_lembur, df_fin
 
     return bytes(pdf.output())
 
+
 # ==========================================
 # 3. SIDEBAR - PARAMETER OPERASIONAL & BIAYA
 # ==========================================
@@ -98,8 +99,9 @@ data_source = st.sidebar.radio(
     ["Gunakan Data Dummy (Default)", "Unggah File CSV/Excel"],
 )
 
+
 # ==========================================
-# 4. LOAD DATASET EKSISTING (Update dgn Kolom Stasiun)
+# 4. LOAD DATASET EKSISTING
 # ==========================================
 if data_source == "Gunakan Data Dummy (Default)":
     df_input = pd.DataFrame({
@@ -133,6 +135,13 @@ else:
             "Target_Output_Unit": [100],
         })
 
+# Cek pergantian sumber data untuk reset simulasi
+if 'current_source' not in st.session_state or st.session_state.current_source != data_source:
+    st.session_state.current_source = data_source
+    if 'df_simulasi' in st.session_state:
+        del st.session_state['df_simulasi']
+
+
 # ==========================================
 # 5. KALKULASI TIME STUDY, WLA & FATIGUE RISK
 # ==========================================
@@ -160,6 +169,7 @@ def indikator_fatigue(val):
 df_input["Kategori_WLA"] = df_input["Percent_WLA"].apply(kategorisasi_wla)
 df_input["Fatigue_Risk"] = df_input["Percent_WLA"].apply(indikator_fatigue)
 
+
 # ==========================================
 # 6. TAMPILAN DASHBOARD (5 TAB STRATEGIS)
 # ==========================================
@@ -172,25 +182,40 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ------------------------------------------
-# PAGE 1: DATA TIME STUDY & KALKULASI DASAR
+# PAGE 1: DATA TIME STUDY & KALKULASI DASAR (REKAP PER STASIUN)
 # ------------------------------------------
 with tab1:
-    st.subheader("📋 Perhitungan Time Study per Stasiun dan Operator")
+    st.subheader("📋 Rekapitulasi Time Study per Stasiun")
+    
+    # 1. Mengelompokkan (grouping) data berdasarkan stasiun
+    df_rekap = df_input.groupby("Stasiun").agg(
+        Jumlah_Operator=('Operator', 'count'), 
+        Total_Waktu_Siklus_Menit=('Waktu_Siklus_Menit', 'sum'),
+        Total_Waktu_Baku_Menit=('Waktu_Baku_Menit', 'sum'),
+        Total_Waktu_Kerja_Menit=('Total_Waktu_Kerja_Menit', 'sum')
+    ).reset_index()
+    
+    # 2. Menghitung rata-rata utilisasi WLA per stasiun
+    df_rekap["Rata_rata_WLA (%)"] = (df_rekap["Total_Waktu_Kerja_Menit"] / (df_rekap["Jumlah_Operator"] * jam_kerja_efektif)) * 100
+
+    # 3. Menampilkan tabel yang sudah diringkas
     st.dataframe(
-        df_input.style.format({
-            "Waktu_Siklus_Menit": "{:.2f}",
-            "Waktu_Normal_Menit": "{:.2f}",
-            "Waktu_Baku_Menit": "{:.2f}",
+        df_rekap.style.format({
+            "Total_Waktu_Siklus_Menit": "{:.2f}",
+            "Total_Waktu_Baku_Menit": "{:.2f}",
             "Total_Waktu_Kerja_Menit": "{:.2f}",
-            "Percent_WLA": "{:.2f}%",
+            "Rata_rata_WLA (%)": "{:.2f}%",
         }),
         use_container_width=True,
+        hide_index=True 
     )
 
+    # 4. Metrik Rangkuman
     col_a, col_b, col_c = st.columns(3)
     col_a.metric("Total Stasiun Kerja", f"{df_input['Stasiun'].nunique()} Stasiun")
     col_b.metric("Total Operator Lini", f"{len(df_input)} Orang")
     col_c.metric("Total Waktu Baku Diperlukan", f"{df_input['Total_Waktu_Kerja_Menit'].sum():.2f} Menit")
+
 
 # ------------------------------------------
 # PAGE 2: VISUALISASI BEBAN KERJA & ERGONOMIC RISK
@@ -218,14 +243,15 @@ with tab2:
         color_discrete_map=color_map, text=df_input["Percent_WLA"].apply(lambda x: f"{x:.1f}%"),
         title="[MICRO] Persentase Beban Kerja (% WLA) per Operator",
     )
-    fig_bar.add_hline(y=threshold_underload, line_dash="dash", line_color="orange")
-    fig_bar.add_hline(y=threshold_overload, line_dash="dash", line_color="red")
+    fig_bar.add_hline(y=threshold_underload, line_dash="dash", line_color="orange", annotation_text="Underload")
+    fig_bar.add_hline(y=threshold_overload, line_dash="dash", line_color="red", annotation_text="Overload")
     st.plotly_chart(fig_bar, use_container_width=True)
 
     st.markdown("### 🫀 Indikator Risiko Kelelahan Kerja (Fatigue)")
     st.dataframe(
         df_input[["Stasiun", "Operator", "Percent_WLA", "Fatigue_Risk"]].style.format({"Percent_WLA": "{:.1f}%"}),
         use_container_width=True,
+        hide_index=True
     )
 
 # ------------------------------------------
@@ -240,7 +266,7 @@ with tab3:
 
     df_sim = st.session_state.df_simulasi
 
-    # Filter Stasiun Dulu!
+    # Filter Stasiun Dulu
     pilih_stasiun = st.selectbox("1. Pilih Stasiun Kerja:", df_sim['Stasiun'].unique())
     df_sim_stasiun = df_sim[df_sim['Stasiun'] == pilih_stasiun]
 
@@ -272,9 +298,12 @@ with tab3:
             if st.button("Terapkan Redistribusi"):
                 st.session_state.df_simulasi.loc[st.session_state.df_simulasi["Operator"] == op_sumber, "Total_Waktu_Kerja_Menit"] -= menit_transfer
                 st.session_state.df_simulasi.loc[st.session_state.df_simulasi["Operator"] == op_penerima, "Total_Waktu_Kerja_Menit"] += menit_transfer
+                
+                # Hitung ulang persentase WLA
                 st.session_state.df_simulasi["Percent_WLA"] = (st.session_state.df_simulasi["Total_Waktu_Kerja_Menit"] / jam_kerja_efektif) * 100
                 st.session_state.df_simulasi["Kategori_WLA"] = st.session_state.df_simulasi["Percent_WLA"].apply(kategorisasi_wla)
                 st.session_state.df_simulasi["Fatigue_Risk"] = st.session_state.df_simulasi["Percent_WLA"].apply(indikator_fatigue)
+                
                 st.success(f"Berhasil memindahkan {menit_transfer} menit kerja dari {op_sumber} ke {op_penerima} di {pilih_stasiun}!")
                 st.rerun()
         else:
@@ -290,7 +319,11 @@ with tab3:
         "Hasil Redistribusi": st.session_state.df_simulasi["Percent_WLA"],
     }).melt(id_vars=["Stasiun", "Operator"], var_name="Kondisi", value_name="Percent_WLA")
 
-    fig_sim = px.bar(df_compare, x="Operator", y="Percent_WLA", color="Kondisi", barmode="group", facet_col="Stasiun", text=df_compare["Percent_WLA"].apply(lambda x: f"{x:.1f}%"))
+    fig_sim = px.bar(
+        df_compare, x="Operator", y="Percent_WLA", color="Kondisi", 
+        barmode="group", facet_col="Stasiun", 
+        text=df_compare["Percent_WLA"].apply(lambda x: f"{x:.1f}%")
+    )
     fig_sim.add_hline(y=threshold_overload, line_dash="dash", line_color="red")
     st.plotly_chart(fig_sim, use_container_width=True)
 
@@ -301,13 +334,16 @@ with tab4:
     st.subheader("⚖️ Analisis Kebutuhan Tenaga Kerja Optimal per Stasiun")
 
     df_hasil_sim = st.session_state.df_simulasi
-    df_kebutuhan = df_hasil_sim.groupby("Stasiun").agg(Total_Waktu=('Total_Waktu_Kerja_Menit', 'sum'), Staff_Eksisting=('Operator', 'count')).reset_index()
+    df_kebutuhan = df_hasil_sim.groupby("Stasiun").agg(
+        Total_Waktu=('Total_Waktu_Kerja_Menit', 'sum'), 
+        Staff_Eksisting=('Operator', 'count')
+    ).reset_index()
     
     df_kebutuhan['Staff_Teoritis'] = df_kebutuhan['Total_Waktu'] / jam_kerja_efektif
     df_kebutuhan['Staff_Optimal'] = np.ceil(df_kebutuhan['Staff_Teoritis']).astype(int)
     df_kebutuhan['Selisih (Rekrut/Kurangi)'] = df_kebutuhan['Staff_Optimal'] - df_kebutuhan['Staff_Eksisting']
 
-    st.dataframe(df_kebutuhan, use_container_width=True)
+    st.dataframe(df_kebutuhan, use_container_width=True, hide_index=True)
 
     sisa_overload = len(df_hasil_sim[df_hasil_sim["Kategori_WLA"] == "Overload"])
     col_e1, col_e2 = st.columns(2)
@@ -345,7 +381,7 @@ with tab5:
         df_lembur = df_final[df_final["Kategori_WLA"] == "Overload"].copy()
         df_lembur["Kebutuhan_Lembur_Jam"] = (df_lembur["Total_Waktu_Kerja_Menit"] - jam_kerja_efektif) / 60.0
         df_lembur["Estimasi_Biaya_Lembur_Rp"] = df_lembur["Kebutuhan_Lembur_Jam"] * tarif_lembur_per_jam
-        st.dataframe(df_lembur[["Stasiun", "Operator", "Kebutuhan_Lembur_Jam", "Estimasi_Biaya_Lembur_Rp"]], use_container_width=True)
+        st.dataframe(df_lembur[["Stasiun", "Operator", "Kebutuhan_Lembur_Jam", "Estimasi_Biaya_Lembur_Rp"]], use_container_width=True, hide_index=True)
         total_biaya_lembur = df_lembur["Estimasi_Biaya_Lembur_Rp"].sum()
     elif selisih_staff < 0:
         status_rekomendasi = f"REKOMENDASI 3: EFISIENSI OPERATOR ({abs(selisih_staff)} ORANG OVERSTAFFED)"
@@ -366,8 +402,20 @@ with tab5:
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
             df_final.to_excel(writer, sheet_name="Simulasi_WLA_Final", index=False)
             pd.DataFrame({"Parameter": ["Status Rekomendasi", "Biaya Lembur"], "Nilai": [status_rekomendasi, total_biaya_lembur]}).to_excel(writer, sheet_name="Ringkasan", index=False)
-        st.download_button("📥 Download Laporan (Excel .xlsx)", data=buffer.getvalue(), file_name="Laporan_DSS_WLA.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        st.download_button(
+            "📥 Download Laporan (Excel .xlsx)", 
+            data=buffer.getvalue(), 
+            file_name="Laporan_DSS_WLA.xlsx", 
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+            use_container_width=True
+        )
 
     with col_exp2:
         pdf_bytes = generate_pdf_report(status_rekomendasi, staff_eksisting, staff_optimal, total_biaya_lembur, df_final)
-        st.download_button("📄 Download Laporan Resmi (PDF .pdf)", data=pdf_bytes, file_name="Laporan_DSS_WLA.pdf", mime="application/pdf", use_container_width=True)
+        st.download_button(
+            "📄 Download Laporan Resmi (PDF .pdf)", 
+            data=pdf_bytes, 
+            file_name="Laporan_DSS_WLA.pdf", 
+            mime="application/pdf", 
+            use_container_width=True
+        )
