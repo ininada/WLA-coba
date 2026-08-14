@@ -99,18 +99,29 @@ data_source = st.sidebar.radio(
     ["Gunakan Data Dummy (Default)", "Unggah File CSV/Excel"],
 )
 
-
 # ==========================================
 # 4. LOAD DATASET EKSISTING
 # ==========================================
 if data_source == "Gunakan Data Dummy (Default)":
     df_input = pd.DataFrame({
-        "Stasiun": ["Perakitan", "Perakitan", "Perakitan", "Pemeriksaan", "Pemeriksaan", "Pengemasan"],
-        "Operator": ["Andi", "Budi", "Citra", "Dani", "Eka", "Fajar"],
-        "Waktu_Siklus_Menit": [3.5, 4.8, 2.9, 1.4, 1.2, 4.5],
-        "Rating_Factor": [1.10, 1.05, 1.00, 0.95, 1.00, 1.10],
-        "Allowance_Percent": [15.0, 12.0, 15.0, 10.0, 12.0, 15.0],
-        "Target_Output_Unit": [150, 150, 150, 150, 150, 150],
+        "Stasiun": [
+            "Pemotongan", "Pemotongan", 
+            "Penghalusan", "Penghalusan", 
+            "Perakitan", "Perakitan", "Perakitan", 
+            "Pemeriksaan", 
+            "Gudang", "Gudang"
+        ],
+        "Operator": [
+            "Andi", "Budi", 
+            "Citra", "Dani", 
+            "Eka", "Fajar", "Gilang", 
+            "Hana", 
+            "Ivan", "Joko"
+        ],
+        "Waktu_Siklus_Menit": [3.2, 4.8, 2.5, 3.7, 3.5, 4.8, 2.9, 1.4, 2.2, 2.0],
+        "Rating_Factor": [1.05, 1.00, 1.10, 1.05, 1.10, 1.05, 1.00, 0.95, 1.00, 1.05],
+        "Allowance_Percent": [15.0, 12.0, 15.0, 12.0, 15.0, 12.0, 15.0, 10.0, 12.0, 15.0],
+        "Target_Output_Unit": [150, 150, 150, 150, 150, 150, 150, 150, 150, 150],
     })
 else:
     uploaded_file = st.sidebar.file_uploader("Unggah File (CSV atau XLSX)", type=["csv", "xlsx"])
@@ -127,7 +138,7 @@ else:
     else:
         st.warning("Silakan unggah file dataset sesuai format kolom. Menampilkan data template sementara:")
         df_input = pd.DataFrame({
-            "Stasiun": ["Stasiun 1"],
+            "Stasiun": ["Pemotongan"],
             "Operator": ["Operator A"],
             "Waktu_Siklus_Menit": [2.0],
             "Rating_Factor": [1.0],
